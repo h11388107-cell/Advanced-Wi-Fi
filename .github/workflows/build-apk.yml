@@ -3,10 +3,9 @@ name: Build Advanced Wi-Fi APK
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '*.zip'
-      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -25,40 +24,60 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK 35
+      - name: Install Android SDK components
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager "platforms;android-35" \
+                     "build-tools;35.0.0"
+          yes | sdkmanager --licenses
 
-      - name: Extract project ZIP
+      - name: Extract project
         run: |
-          ZIP_FILE=$(find . -maxdepth 1 -name '*.zip' -print -quit)
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)
+
           if [ -z "$ZIP_FILE" ]; then
-            echo "Project ZIP not found"
+            echo "ERROR: Project ZIP not found"
             exit 1
           fi
-          mkdir -p extracted
-          unzip -q "$ZIP_FILE" -d extracted
 
-      - name: Find Android project
+          mkdir project
+          unzip -q "$ZIP_FILE" -d project
+
+      - name: Locate Android project
         run: |
-          WRAPPER=$(find extracted -type f -path '*/android/gradlew' -print -quit)
+          WRAPPER=$(find project -type f -path '*/android/gradlew' -print -quit)
+
           if [ -z "$WRAPPER" ]; then
-            echo "Android Gradle wrapper not found"
+            echo "ERROR: android/gradlew not found"
+            find project -maxdepth 4 -type f
             exit 1
           fi
+
           ROOT="${WRAPPER%/android/gradlew}"
           echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
 
-      - name: Build APK
+      - name: Build Debug APK
         run: |
           cd "$PROJECT_ROOT/android"
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
+      - name: Find APK
+        run: |
+          APK=$(find "$PROJECT_ROOT/android/app/build/outputs/apk" \
+            -type f -name '*.apk' -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated"
+            exit 1
+          fi
+
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          echo "APK generated successfully"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Advanced-WiFi-APK
-          path: extracted/**/android/app/build/outputs/apk/debug/*.apk
+          path: ${{ env.APK_PATH }}
           if-no-files-found: error
           
